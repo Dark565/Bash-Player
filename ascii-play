@@ -6,6 +6,22 @@
 #>	jp2a
 #>	ffmpeg
 
+findInPath() {
+
+	find $(tr ':' '\n' <<< "$PATH") 2>/dev/null | grep ffmpeg >/dev/null
+
+}
+
+if ! findInPath ffmpeg; then
+	echo "Error: ffmpeg not found." 1>&2
+	exit 1
+fi
+
+if ! findInPath jp2a; then
+	echo "Error: jp2a not found." 1>&2
+	exit
+fi
+
 if [[ ! -z $1 ]]; then
 	VIDEO="$1"
 else
@@ -31,6 +47,10 @@ clean() {
 # Get full nanoseconds
 fullnano() {
 	date '+%s%N'
+}
+
+CPU() {
+	ffmpeg -i "$1" -threads $USED_THREADS $3 "$2"
 }
 
 CUDA() {
@@ -122,14 +142,10 @@ encode_ascii() {
 
 }
 
-if [[ ! -r "/dev/dri/renderD128" ]]; then
-	echo "Error: DRI render block device not found. Video acceleration is imposible" 1>&2
-	exit 1 
-fi
 
 DetectGPU() {
 
-	echo "Detecting GPU.."
+	echo "Detecting GPU.." 1>&2
 
 
 	# Most popular method, but it doesn't work without the X session and in tty even if DISPLAY is exported
@@ -176,7 +192,7 @@ DetectGPU() {
 		esac
 	fi
 
-	echo "GPU detected."
+	echo "GPU detected." 1>&2
 }
 
 
@@ -191,30 +207,40 @@ test_codec() {
 
 testCodecs() {
 
+	if [[ ! -z $CODEC ]]; then
+		if [[ $CODEC == "CPU" ]]; then
+			GPU="$CPUN"
+		fi
+		return 0
+	fi
 
-	echo "Testing for VAAPI.."
+	echo "Testing for VAAPI.." 1>&2
 
 	if ! test_codec VAAPI; then
-		echo "Warning: VAAPI is not available on your platform. Maybe just replace your GPU with AMD or Intel.."
+		echo "Warning: VAAPI is not available on your platform. Maybe just replace your GPU with AMD or Intel.." 1>&2
 	else
 		CODEC=VAAPI
-		echo "VAAPI works."
+		echo "VAAPI works." 1>&2
 		return 0
 	fi
 
-	echo "Testing for CUDA.."
+	echo "Testing for CUDA.." 1>&2
 
 	if ! test_codec CUDA; then
-		echo "Warning: CUDA also doesn't work, what means you haven't got a NVIDIA card.."
+		echo "Warning: CUDA also doesn't work, what means you haven't got a NVIDIA card.. Maybe this way is better." 1>&2
 	else
 		CODEC=CUDA
-		echo "CUDA works."
+		echo "CUDA works." 1>&2
 		return 0
 	fi
 
-	echo "None of supported codecs doesn't work.."
-	echo "Exiting."
-	exit 1
+
+	echo "None of supported GPU-accelerated codecs doesn't work.." 1>&2
+	echo "Using CPU" 1>&2
+	
+	GPU="$CPUN"
+
+	CODEC=CPU
 
 }
 
@@ -233,7 +259,7 @@ TMP_NAME="/dev/shm/jpvideo-$$-frames"
 mkdir "$TMP_NAME"
 
 if [[ ! $? -eq 0 ]]; then
-	echo "Error: Cannot create a temporary directory for frames."
+	echo "Error: Cannot create a temporary directory for frames." 1>&2
 	exit 1
 fi
 
@@ -276,7 +302,7 @@ echo "Decoding the audio..." 1>&2
 ffmpeg -i "$VIDEO_PATH" "$SOUNDNAME" 2>/dev/null
 
 if [[ ! $? -eq 0 ]]; then
-	echo "Warning: Cannot export sound. Video is going to be quiet" 2>&1
+	echo "Warning: Cannot export sound. Video is going to be quiet" 1>&2
 else
 	echo "Audio decoded." 1>&2
 fi
@@ -308,10 +334,10 @@ stats() {
 
 printf "
 \033[7;21mName: $VIDEO | Frame: ${NOW_INDEX}/${FRAMES} | Second: $((NOW_INDEX/FPS_INT))/${SECS_INT} | Player speed: ${PLAYER_FPS} FPS | FPS: ${FPS} | CPUs: ${THREADS_COUNT} | Threads: ${USED_THREADS}	
-Video decoder - Codec: VAAPI (GPU) | Speed: $(cat deltafps_jpg.txt 2>/dev/null) FPS | Hardware: $GPU | \033[7;21mStatus: " 
+Video decoder - Codec: $CODEC | Speed: $(cat deltafps_jpg.txt 2>/dev/null) FPS | Hardware: $GPU | \033[7;21mStatus: " 
 pgrep -P $$ | grep "$MPPID" >/dev/null && printf "Working!" || printf "Finished"
 printf "	
-\033[7;21mAscii encoder - Codec: CPU Speed: $(cat deltafps_ascii.txt 2>/dev/null) FPS | Hardware: ${CPUN} | \033[7;21mStatus: "
+\033[7;21mAscii encoder - Codec: CPU | Speed: $(cat deltafps_ascii.txt 2>/dev/null) FPS | Hardware: ${CPUN} | \033[7;21mStatus: "
 pgrep -P $$ | grep "$ASCPID" >/dev/null && printf "Working!" || printf "Finished"
 printf "	\033[0m"
 
