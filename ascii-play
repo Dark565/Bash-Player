@@ -48,10 +48,7 @@ event_listen() {
 
 	while read -n1 c; do
 
-		notify-send -u low "$c"
-
 		if [[ $c == ' ' ]]; then
-			notify-send "ABC"
 			kill -n SIGUSR1 $1
 		fi
 	done
@@ -60,21 +57,9 @@ event_listen() {
 
 # Convert frames to ascii
 encode_once() {
-	if [[ ! -f "$1" ]]; then
-		if [[ -z $WAITING_DECODE_TIME ]]; then
-	
-			WAITING_DECODE_START=$(fullnano)
-			while [[ ! -f "$1" ]]; do
-				continue
-			done
-			WAITING_DECODE_TIME=$(echo "($(fullnano)-$WAITING_DECODE_START)/1000000000" | bc -l)
-		else
-			sleep $WAITING_DECODE_TIME
-			while [[ ! -f "$1" ]]; do
-				continue
-			done
-		fi
-	fi
+	while [[ ! -f "$1" ]]; do
+		continue
+	done
 
 	jp2a "$1" --width="$WIDTH" #--color
 	rm "$1" &
@@ -82,7 +67,7 @@ encode_once() {
 
 # Export frames from video
 decode_frames() {
-		VAAPI "$VIDEO_PATH" "%01d.jpg" 2>/dev/null
+		$CODEC "$VIDEO_PATH" "%01d.jpg" 2>/dev/null
 }
 
 DEC_FPS=0
@@ -144,6 +129,8 @@ fi
 
 DetectGPU() {
 
+	echo "Detecting GPU.."
+
 	GLX_INFO="$(glxinfo 2>/dev/null)" # Most popular method, but it doesn't work without the X session
 	if [[ $? -eq 0 ]]; then
 		GPU="$(echo "$GLX_INFO" | grep 'OpenGL renderer string:' | sed 's/^[^:]*: //g')"
@@ -161,31 +148,65 @@ DetectGPU() {
 		GPU="$(echo "$GPU" | grep "$PCI_BUS" | sed 's/^[^ ]* [^:]*: //g')"
 		return 0
 	else
+		vendor="$(sed 's/^0x//g' < "$DEV_PATH/vendor")"
 		case "$(cat "$DEV_PATH/vendor")" in
-			0x8086 )
-				case "$(cat "$DEV_PATH/revision")" in
-					0x04 )
-						GPU="Intel HD Graphics 6xx (rev 4)"
-						;;
-					* )
-						GPU="Intel"
-						;;
-				esac
+			8086 )
+				GPU="Intel"
 				;;
+			# Read GPU name from PCI ids repository
 			* )
-				GPU="Basic DRM Graphics Card"
+
+				GPU="$(curl "https://pci-ids.ucw.cz/read/PC/$vendor" 2>/dev/null)"
+
+				if [[ $? -eq 0 ]]; then
+					GPU="$(echo "$GPU" | grep Name: | head -n 1 | sed -e 's/<[^>]*>//g' -e 's/^[^:]*: //g')"
+				else	
+					GPU="Some DRM compatible graphics card"
+				fi
+				;;
 		esac
 	fi
+
+	echo "GPU detected."
 }
 
 
 test_codec() {
 
 	local result
-	$1 "$VIDEO_PATH" out.jpg "-vframes 1"
+	$1 "$VIDEO_PATH" out.jpg "-vframes 1" 2>/dev/null
 	result=$?
 	rm out.jpg 2>/dev/null
 	return $result
+}
+
+testCodecs() {
+
+
+	echo "Testing for VAAPI.."
+
+	if ! test_codec VAAPI; then
+		echo "Warning: VAAPI is not available on your platform. Maybe just replace your GPU with AMD or Intel.."
+	else
+		CODEC=VAAPI
+		echo "VAAPI works."
+		return 0
+	fi
+
+	echo "Testing for CUDA.."
+
+	if ! test_codec CUDA; then
+		echo "Warning: CUDA also doesn't work, what means you haven't got a NVIDIA card.."
+	else
+		CODEC=CUDA
+		echo "CUDA works."
+		return 0
+	fi
+
+	echo "None of supported codecs doesn't work.."
+	echo "Exiting."
+	exit 1
+
 }
 
 # Like the command says
@@ -197,28 +218,6 @@ CPUN="$(echo "$CPUSTAT" | grep 'Model name:' | sed 's/^[^:]*: *\([^ ].*\)$/\1/g'
 
 # Get informations about the video
 STATUS="$(ffmpeg -i "$VIDEO" 2>&1)" 								# Status data
-DURATION="$(echo "$STATUS" | grep 'Duration:' | sed 's/^.*Duration: \([^,]*\),.*$/\1/g')"	# Video duration in ffmpeg format (eg. 01:05:43.54)
-SECS="$(echo "$DURATION" | awk -F ':' '{ printf("%f", $1*3600+$2*60+$3) }')"			# Video duration in second
-SECS_INT="$(printf "%i" "$SECS")"
-FPS="$(echo "$STATUS" | grep 'fps' | sed 's/^.* \([0-9\.]*\) fps.*$/\1/g')"			# Frames Per Second
-FPS_INT="$(printf "%i" "$FPS")"
-SPF=$(echo "$FPS" | awk '{ printf("%f", 1/$1) }')						# Seconds Per Frame
-FPN="$(echo "$FPS" | awk ' { printf("%.9f", $1/1000/1000/1000) } ')"				# Frames Per Nanosecond
-FRAMES="$(echo "$FPS" "$SECS" | awk ' { printf("%i", $1*$2) } ')"				# Frames count
-FRAMES_OVER=$((FRAMES+1))
-PROPORTION="$(echo "$STATUS" | grep 'SAR' | sed 's/^.*DAR \([0-9\:]*\)[^0-9\:].*$/\1/g')"	# Proportion (eg. 16:9)
-PROPORTION_DIV="$(echo $PROPORTION | awk -F ':' ' { printf("%f",$1/$2) } ')"			# Divided proportion (eg. 1.77)
-HEIGHT="$(echo "$WIDTH" "$PROPORTION_DIV" | awk ' { printf("%i",$1/$2) } ')"			# Output video height
-#FramesPerCall=$((FPS_INT*32))									# Frames per each ffmpeg call
-
-echo $FPS $DURATION
-
-if [[ -z $SECS || -z $FPS ]]; then
-	echo "Error: Cannot get informations about the video." 1>&2
-	exit 1
-fi
-
-echo "${SECS}s" "${FPS} FPS" "${FRAMES} FRAMES" "${PROPORTION} PROPORTION" "${PROPORTION_DIV} DIV_PROPORTION" "${HEIGHT} HEIGHT"
 
 # Create a temponary directory for converter's cache in shared memory file system - /dev/shm (this file system instead of /tmp, always is tmpfs type, where /tmp defaultly may be ext, like in my SUSE system)
 TMP_NAME="/dev/shm/jpvideo-$$-frames"
@@ -229,18 +228,36 @@ if [[ ! $? -eq 0 ]]; then
 	exit 1
 fi
 
+# Move into a temporary directory
+cd "$TMP_NAME"
+
+#Checks for available codecs
+testCodecs
+
+DURATION="$(echo "$STATUS" | grep 'Duration:' | sed 's/^.*Duration: \([^,]*\),.*$/\1/g')"	# Video duration in ffmpeg format (eg. 01:05:43.54)
+SECS="$(echo "$DURATION" | awk -F ':' '{ printf("%f", $1*3600+$2*60+$3) }')"			# Video duration in second
+SECS_INT="$(printf "%i" "$SECS" 2>/dev/null)"
+FPS="$(echo "$STATUS" | grep 'fps' | sed 's/^.* \([0-9\.]*\) fps.*$/\1/g')"			# Frames Per Second
+FPS_INT="$(printf "%i" "$FPS" 2>/dev/null)"
+SPF=$(echo "$FPS" | awk '{ printf("%f", 1/$1) }')						# Seconds Per Frame
+FPN="$(echo "$FPS" | awk ' { printf("%.9f", $1/1000/1000/1000) } ')"				# Frames Per Nanosecond
+FRAMES="$(echo "$FPS" "$SECS" | awk ' { printf("%i", $1*$2) } ')"				# Frames count
+FRAMES_OVER=$((FRAMES+1))
+PROPORTION="$(echo "$STATUS" | grep 'SAR' | sed 's/^.*DAR \([0-9\:]*\)[^0-9\:].*$/\1/g')"	# Proportion (eg. 16:9)
+PROPORTION_DIV="$(echo $PROPORTION | awk -F ':' ' { printf("%f",$1/$2) } ')"			# Divided proportion (eg. 1.77)
+HEIGHT="$(echo "$WIDTH" "$PROPORTION_DIV" | awk ' { printf("%i",$1/$2) } ')"			# Output video height
+#FramesPerCall=$((FPS_INT*32))									# Frames per each ffmpeg call
+
+if [[ -z $SECS || -z $FPS ]]; then
+	echo "Error: Cannot get informations about the video." 1>&2
+	exit 1
+fi
+
+
 # Get threads count
 THREADS_COUNT="$(echo "$CPUSTAT" | grep '^CPU(s):' | sed 's/^[^0-9]*\([0-9].*\)$/\1/g')"
 [[ -z $USED_THREADS ]] && USED_THREADS="$((THREADS_COUNT/2))"
 
-# Move into a temporary directory
-cd "$TMP_NAME"
-
-# Check is VAAPI available. Of course other codecs like cuvid or nvenc also will be supported
-if ! test_codec VAAPI; then
-	echo "Error: VAAPI is not available on your platform. Maybe just replace your GPU with AMD or Intel.."
-	exit 1
-fi
 
 SOUNDNAME="sound.wav"
 
