@@ -29,6 +29,9 @@ else
 	exit 1
 fi
 
+# Set global language to c (aka en)
+export LANG="c"
+
 VIDEO_PATH="$PWD/$VIDEO"
 
 [[ -z $WIDTH ]] && WIDTH=200
@@ -227,7 +230,7 @@ testCodecs() {
 	echo "Testing for CUDA.." 1>&2
 
 	if ! test_codec CUDA; then
-		echo "Warning: CUDA also doesn't work, what means you haven't got a NVIDIA card.. Maybe this way is better." 1>&2
+		echo "Warning: CUDA also doesn't work, what means you haven't got a NVIDIA card or it is epic old." 1>&2
 	else
 		CODEC=CUDA
 		echo "CUDA works." 1>&2
