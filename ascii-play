@@ -149,11 +149,11 @@ DetectGPU() {
 	# Add super user directories to the PATH
 	export PATH="$PATH:/sbin:/usr/sbin"
 
-	PCI_BUS="$(grep 'PCI_SLOT_NAME' "$DEV_PATH/uevent" | sed 's/^[^:]*://g')"
-	GPU="$(lspci 2>/dev/null)"
+	PCI_BUS="$(grep 'PCI_SLOT_NAME' "$DEV_PATH/uevent" | sed 's/^[^=]*=//g')"
+	GPU="$(lspci -s "$PCI_BUS" 2>/dev/null)"
 
 	if [[ $? -eq 0 ]]; then
-		GPU="$(echo "$GPU" | grep "$PCI_BUS" | sed 's/^[^ ]* [^:]*: //g')"
+		GPU="$(echo "$GPU" | sed 's/^[^ ]* [^:]*: //g')"
 		return 0
 	else
 		# This method obtains GPU basing on vendor
