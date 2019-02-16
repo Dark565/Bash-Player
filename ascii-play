@@ -30,8 +30,6 @@ clean() {
 
 # Get full nanoseconds
 fullnano() {
-	# Add nanoseconds to seconds
-	#echo $(date '+%s %N') | awk '{ printf("%i", $1*1000000000+$2) }'
 	date '+%s%N'
 }
 
@@ -84,20 +82,7 @@ encode_once() {
 
 # Export frames from video
 decode_frames() {
-	#local ctr=0
-	#local iter=0
-	#START_T=$(fullnano)
-	#while [ "$ctr" -lt "$FRAMES" ]; do
-		#ss_time="$(echo "$SPF*$ctr" | bc -l)"
-		#ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi -i "$VIDEO_PATH" -ss "$ss_time" -vframes "$FramesPerCall" -c:v mjpeg_vaapi "${iter}%01d.jpg" 2>/dev/null
 		VAAPI "$VIDEO_PATH" "%01d.jpg" 2>/dev/null
-		#ctr="$((ctr+FramesPerCall))"
-		#iter="$((iter+1))"
-		# Calculate fps and save it to file
-		#END_T=$(fullnano)
-		#DELTA_FPS=$(echo "scale=2;1000000000/($END_T-$START_T)*$FramesPerCall" | bc -l)
-		#printf "$DELTA_FPS" > deltafps_jpg.txt
-		#START_T="${END_T}"
 }
 
 DEC_FPS=0
@@ -135,17 +120,12 @@ encode_ascii() {
 	while [ "$ctr" -lt "$FRAMES_OVER" ]; do
 		for i in $(seq 1 $((${USED_THREADS}-1))); do
 			fram_ind=$((ctr+i))
-			#fram_name="$((fram_ind/FramesPerCall))$(((fram_ind%FramesPerCall)+1)).jpg"
 			encode_once "${fram_ind}.jpg" >${fram_ind}.txt &
 		done
-		#fram_name="$((ctr/FramesPerCall))$(((ctr%FramesPerCall)+1)).jpg"
 
 		encode_once "${ctr}.jpg" >${ctr}.txt
 		ctr=$((ctr+USED_THREADS))
-		wait
-
-		# Remove all useless .jpg frames
-		#rm *.jpg
+		wait	
 
 		# Calculate fps and save it to a file
 		END_T=$(fullnano)
@@ -153,10 +133,6 @@ encode_ascii() {
 		printf "$DELTA_FPS" > deltafps_ascii.txt
 		START_T="${END_T}"
 		calc_decoder_fps > deltafps_jpg.txt
-		#for i in $(seq 1 $((12-$(echo $DELTA_T | wc -c)))); do
-		#	echo '0'
-		#done
-		#echo $DELTA_T
 	done
 
 }
@@ -212,8 +188,9 @@ test_codec() {
 	return $result
 }
 
+# Like the command says
 DetectGPU
-#GPU="$(glxinfo | grep 'OpenGL renderer string: ' | sed 's/^[^:]*://g')"
+
 # Get CPU name
 CPUSTAT="$(lscpu)"
 CPUN="$(echo "$CPUSTAT" | grep 'Model name:' | sed 's/^[^:]*: *\([^ ].*\)$/\1/g')"
@@ -243,10 +220,6 @@ fi
 
 echo "${SECS}s" "${FPS} FPS" "${FRAMES} FRAMES" "${PROPORTION} PROPORTION" "${PROPORTION_DIV} DIV_PROPORTION" "${HEIGHT} HEIGHT"
 
-# Calculate frametime
-#SLEEPLAG="$(bash -c 'time sleep 0' 2>&1 | grep 'real' | sed 's/^.*0m\(.*\)s$/\1/g')"
-#SLEEPTIME="$(echo $FPS | awk '{ printf("%f", 1/$1/2) }')"
-
 # Create a temponary directory for converter's cache in shared memory file system - /dev/shm (this file system instead of /tmp, always is tmpfs type, where /tmp defaultly may be ext, like in my SUSE system)
 TMP_NAME="/dev/shm/jpvideo-$$-frames"
 mkdir "$TMP_NAME"
@@ -259,14 +232,6 @@ fi
 # Get threads count
 THREADS_COUNT="$(echo "$CPUSTAT" | grep '^CPU(s):' | sed 's/^[^0-9]*\([0-9].*\)$/\1/g')"
 [[ -z $USED_THREADS ]] && USED_THREADS="$((THREADS_COUNT/2))"
-
-# Export frames to jpg
-#ffmpeg -i "$VIDEO" -threads $USED_THREADS "$TMP_NAME/%03d.jpg" 2>/dev/null
-#
-#if [[ ! $? -eq 0 ]]; then
-#	echo "Error: Cannot export video frames" 1>&2
-#	exit 1
-#fi
 
 # Move into a temporary directory
 cd "$TMP_NAME"
@@ -297,22 +262,6 @@ MPPID=$!
 
 
 [[ $PRELOAD ]] && sleep $PRELOAD
-#sleep 5
-
-#C_SLEEP=0.1
-#sleep $C_SLEEP
-#
-# Number of frames after 1/10 of second
-#JPG_LEN=$(ls|grep '\.jpg'|wc -l)
-#C_FPS=$(echo "$JPG_LEN" "$C_SLEEP" | awk '{ printf("%i",$1/$2) }')
-#
-#echo $C_FPS $FPS
-#
-#if [[ $(echo "$C_FPS<$FPS" | bc) == '1' ]]; then
-#	ELSE_SLEEP="$(echo $C_FPS $FPS | awk '{ printf("%f", $2/$1-1) }')"
-#	#Sleep some time more
-#	sleep "$ELSE_SLEEP"
-#fi
 
 # Convert them in another process
 encode_ascii &
@@ -351,32 +300,18 @@ play_frames() {
 
 	while [ "$NOW_INDEX" -lt "$FRAMES_OVER" ]; do
 		NOW_NANO=$(fullnano)
-		#SUB_NANO=$(echo "$NOW_NANO-$START_NANO" | bc -l)
-		#FRAME_NANO=$(echo "$NOW_NANO-$COUNT_NANO" | bc -l)
 		NOW_INDEX="$(echo "(($NOW_NANO-$START_NANO)*$FPN+1) / 1" | bc)"
 		 # Move cursor to the beginning
 		printf "\033[1;1H"
-		#cat ${NOW_INDEX}.txt
-		# Wait for frame when is not even rencoded
-		#read -n 1 -u "${COPROC[0]}"
 		if cat "${NOW_INDEX}.txt" 2>/dev/null; then
 			rm "${LAST_GOOD_INDEX}.txt" 2>/dev/null &
 			LAST_GOOD_INDEX="$NOW_INDEX"
 		else
 			cat "${LAST_GOOD_INDEX}.txt" 2>/dev/null
 		fi
-		#rm "${NOW_INDEX}.txt"
-		# Print statistics
-		#echo $NOW_NANO $COUNT_NANO
 		PLAYER_FPS=$(echo "scale=2;1000000000/($NOW_NANO-$COUNT_NANO)" | bc)
-		#PLAYER_FPS=$(echo $NOW_NANO $COUNT_NANO | awk ' { printf("%.2f", 1000000000/($1-$2)) } ')
-
-		#PLAYER_FPS=$((1000000000/($NOW_NANO-$START_NANO)))
-
-
 		COUNT_NANO=$NOW_NANO
 		stats
-		#sleep $SLEEPTIME
 	done
 
 }
