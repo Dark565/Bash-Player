@@ -131,29 +131,38 @@ DetectGPU() {
 
 	echo "Detecting GPU.."
 
-	GLX_INFO="$(glxinfo 2>/dev/null)" # Most popular method, but it doesn't work without the X session
-	if [[ $? -eq 0 ]]; then
-		GPU="$(echo "$GLX_INFO" | grep 'OpenGL renderer string:' | sed 's/^[^:]*: //g')"
-		return 0
+
+	# Most popular method, but it doesn't work without the X session and in tty even if DISPLAY is exported
+	if [[ ! $(tty) =~ '^/dev/tty[0-9]*$' ]]; then
+
+		GLX_INFO="$(glxinfo 2>/dev/null)"
+		if [[ $? -eq 0 ]]; then
+			GPU="$(echo "$GLX_INFO" | grep 'OpenGL renderer string:' | sed 's/^[^:]*: //g')"
+			return 0
+		fi
+
 	fi
 	DEV_PATH="/sys/class/drm/renderD128/device"
 
-	# Get GPU name
+	# Get GPU name from the pci identificator
+
+	# Add super user directories to the PATH
+	export PATH="$PATH:/sbin:/usr/sbin"
+
 	PCI_BUS="$(grep 'PCI_SLOT_NAME' "$DEV_PATH/uevent" | sed 's/^[^:]*://g')"
-	GPU="$(lspci 2>/dev/null)" # Works only when user is root
+	GPU="$(lspci 2>/dev/null)"
 
-
-	# This method obtains GPU basing on vendor and revision
 	if [[ $? -eq 0 ]]; then
 		GPU="$(echo "$GPU" | grep "$PCI_BUS" | sed 's/^[^ ]* [^:]*: //g')"
 		return 0
 	else
+		# This method obtains GPU basing on vendor
 		vendor="$(sed 's/^0x//g' < "$DEV_PATH/vendor")"
 		case "$(cat "$DEV_PATH/vendor")" in
 			8086 )
-				GPU="Intel"
+				GPU="Intel Corporation"
 				;;
-			# Read GPU name from PCI ids repository
+			# Read GPU vendor name from pci-ids network repository
 			* )
 
 				GPU="$(curl "https://pci-ids.ucw.cz/read/PC/$vendor" 2>/dev/null)"
