@@ -29,8 +29,8 @@ else
 	exit 1
 fi
 
-# Set global language to c (aka en)
-export LANG="c"
+# Set global language to english (en_US)
+export LANG="en_US"
 
 VIDEO_PATH="$PWD/$VIDEO"
 
