@@ -53,7 +53,7 @@ fullnano() {
 }
 
 CPU() {
-	ffmpeg -i "$1" -threads $USED_THREADS $3 "$2"
+	ffmpeg -i "$1" -threads $USED_THREADS $3 -vf scale=${WIDTH}x${HEIGHT} "$2"
 }
 
 CUDA() {
