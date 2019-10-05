@@ -113,13 +113,25 @@ interval() {
 }
 
 # Cat using builtin commands
-fast_cat() {
-	exec 10<"$1" 2>/dev/null || return 1
-	while read -u 10 -r LINE; do
-		echo "$LINE"
-	done
-	exec 10>&-
+_cat() {
+	local DATA="$(<$1)"
+	[[ $? -eq 0 ]] || return 1
+	echo "$DATA"
 }
+
+
+if [[ $DEBUG -ge 1 ]]; then
+	echo "System cat time: "
+	time cat /proc/self/status >/dev/null
+
+	echo "Builtin cat time: "
+	time _cat /proc/self/status >/dev/null
+
+	if [[ $DEBUG == 2 ]]; then
+		exit 0
+	fi
+fi
+
 
 pl_send_seek_backward() {
 	local SEC="$1"
@@ -607,10 +619,10 @@ play_frames() {
 		NOW_INDEX="$(echo "(($NOW_NANO-$START_NANO)*$FPN+1) / 1" | bc)"
 		 # Move cursor to the beginning
 		printf "\033[1;1H"
-		if cat "${NOW_INDEX}.txt" 2>/dev/null; then
+		if _cat "${NOW_INDEX}.txt" 2>/dev/null; then
 			LAST_GOOD_INDEX="$NOW_INDEX"
 		else
-			cat "${LAST_GOOD_INDEX}.txt" 2>/dev/null
+			_cat "${LAST_GOOD_INDEX}.txt" 2>/dev/null
 		fi
 		#PLAYER_FPS=$(echo "scale=2;1000000000/($NOW_NANO-$COUNT_NANO)" | bc)
 		#PLAYER_FPS=$((NS_M_PS_PRECISION/(NOW_NANO-COUNT_NANO)))
